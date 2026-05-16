@@ -2,17 +2,17 @@
 
 ## 介绍
 
-FlagDNN 是 [FlagOS](https://flagos.io/) 的一部分。
-FlagDNN是一个面向多种芯片后端的深度神经网络计算库，它提供了常见深度学习算子的高性能实现，支持深度学习、计算机视觉、自然语言处理和人工智能等领域的高效计算。
+FlagGems-vllm 是 [FlagOS](https://flagos.io/) 的一部分。
+FlagGems-vllm是一个面向多种芯片后端的高性能算子库，它提供了常见vllm算子的高性能实现，支持多种常见模型的高性能推理及部署。
 
-FlagDNN 是一个使用 OpenAI 推出的[Triton 编程语言](https://github.com/openai/triton)实现的高性能深度学习算子库，
+FlagGems-vllm 是一个使用 OpenAI 推出的[Triton 编程语言](https://github.com/openai/triton)实现的高性能深度学习算子库，
 
 ## 特性
 
 - 算子已经过深度性能调优
 - Triton kernel 调用优化
 - 灵活的多后端支持机制
-- 支持常见深度学习算子（如 ReLU 等）
+- 支持常见vllm算子（如 moe_align_block_size 等）
 
 ## 快速安装
 
@@ -21,10 +21,10 @@ FlagDNN 是一个使用 OpenAI 推出的[Triton 编程语言](https://github.com
 ```shell
 pip install -U scikit-build-core>=0.11 pybind11 ninja cmake
 ```
-### 安装FlagDNN
+### 安装FlagGems-vllm
 ```shell
-git clone https://github.com/flagos-ai/FlagDNN.git
-cd FlagDNN
+git clone https://github.com/flagos-ai/FlagGems-vllm.git
+cd FlagGems-vllm
 pip install  .
 ```
 

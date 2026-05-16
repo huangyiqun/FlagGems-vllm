@@ -1253,7 +1253,7 @@ class PointwiseDynamicFunction:
     the rank of the task space(the broadcasted
     shape of all input tensors). The generated code
     are written out to the cache directory
-    (defaults to ~/.flagdnn).
+    (defaults to ~/.FlagGems-vllm).
     """
 
     def __init__(

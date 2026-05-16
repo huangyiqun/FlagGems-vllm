@@ -15,8 +15,8 @@ has_c_extension = False
 use_c_extension = False
 aten_patch_list = []
 
-# set FLAGDNN_SOURCE_DIR for cpp extension to find
-os.environ["FLAGDNN_SOURCE_DIR"] = str(Path(__file__).parent.resolve())
+# set FlagGems-vllm_SOURCE_DIR for cpp extension to find
+os.environ["FlagGems-vllm_SOURCE_DIR"] = str(Path(__file__).parent.resolve())
 
 try:
     from flaggems_vllm import c_operators  # type: ignore[attr-defined]
@@ -30,7 +30,7 @@ except ImportError:
 use_env_c_extension = os.environ.get("USE_C_EXTENSION", "0") == "1"
 if use_env_c_extension and not has_c_extension:
     warnings.warn(
-        "[FlagDNN] USE_C_EXTENSION is set, but C extension is not available. "
+        "[FlagGems-vllm] USE_C_EXTENSION is set, but C extension is not available. "
         "Falling back to pure Python implementation.",
         RuntimeWarning,
     )

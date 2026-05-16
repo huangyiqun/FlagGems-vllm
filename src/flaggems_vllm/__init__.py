@@ -42,7 +42,7 @@ def enable(
     once=False,
     path=None,
 ):
-    """Register all FlagDNN ops except those explicitly excluded.
+    """Register all FlagGems-vllm ops except those explicitly excluded.
 
     Args:
         lib: torch.library.Library instance to register into. Defaults to the
@@ -56,7 +56,7 @@ def enable(
               runtime/backend/_<vendor>/[<arch>/]
               enable_configs.yaml if present.
         registrar: Registrar class; defaults to `Register`.
-        record: Whether to enable FlagDNN logging.
+        record: Whether to enable FlagGems-vllm logging.
         once: When True, log only once.
         path: Optional log output path when recording.
 
@@ -82,7 +82,7 @@ def only_enable(
     once=False,
     path=None,
 ):
-    """Register only the specified FlagDNN ops and skip the rest.
+    """Register only the specified FlagGems-vllm ops and skip the rest.
 
     Args:
         lib: torch.library.Library instance to register into. Defaults to the
