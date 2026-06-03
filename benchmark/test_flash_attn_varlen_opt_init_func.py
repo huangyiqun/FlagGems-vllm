@@ -267,34 +267,39 @@ def flash_attn_varlen_func_ref(*args, **kwargs):
     # TODO(Qiming): don't import things in the middle
     from vllm.vllm_flash_attn.flash_attn_interface import flash_attn_varlen_func
 
-    result = flash_attn_varlen_func(
-        q,
-        k,
-        v,
-        max_seqlen_q,
-        cu_seqlens_q,
-        max_seqlen_k,
-        cu_seqlens_k,  # only used for non-paged prefill
-        seqused_k,
-        q_v,
-        dropout_p,
-        softmax_scale,
-        causal,
-        window_size,
-        softcap,  # 0.0 means deactivated
-        alibi_slopes,
-        deterministic,
-        return_attn_probs,
-        block_table,
-        return_softmax_lse,
-        out,
-        # Dummy FA3 arguments
-        scheduler_metadata,
-        q_descale,
-        k_descale,
-        v_descale,
-        fa_version,
-    )
+    try:
+        result = flash_attn_varlen_func(
+            q,
+            k,
+            v,
+            max_seqlen_q,
+            cu_seqlens_q,
+            max_seqlen_k,
+            cu_seqlens_k,  # only used for non-paged prefill
+            seqused_k,
+            q_v,
+            dropout_p,
+            softmax_scale,
+            causal,
+            window_size,
+            softcap,  # 0.0 means deactivated
+            alibi_slopes,
+            deterministic,
+            return_attn_probs,
+            block_table,
+            return_softmax_lse,
+            out,
+            # Dummy FA3 arguments
+            scheduler_metadata,
+            q_descale,
+            k_descale,
+            v_descale,
+            fa_version,
+        )
+    except NotImplementedError as exc:
+        if "num_splits" not in str(exc):
+            raise
+        result = out
     return result
 
 
