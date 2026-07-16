@@ -23,8 +23,15 @@ ENV_SMOKE_TRIGGER_FILES = {
     ".github/workflows/basic-ci.yml",
     "pyproject.toml",
     "pytest.ini",
+    "tools/run-multi-backend-tests.sh",
     "tools/setup.sh",
 }
+
+ENV_SMOKE_TRIGGER_PREFIXES = (
+    ".github/actions/",
+    ".github/workflows/",
+    "src/flaggems_vllm/runtime/",
+)
 
 ENV_SMOKE_TESTS = [
     "tests/test_add_rms_norm.py",
@@ -207,7 +214,9 @@ def is_non_test_change(path: str) -> bool:
 
 
 def triggers_env_smoke_tests(path: str) -> bool:
-    return path in ENV_SMOKE_TRIGGER_FILES
+    return path in ENV_SMOKE_TRIGGER_FILES or path.startswith(
+        ENV_SMOKE_TRIGGER_PREFIXES
+    )
 
 
 def select_targets(

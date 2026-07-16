@@ -1,5 +1,8 @@
 name: basic ci
 
+permissions:
+  contents: read
+
 on:
   push:
     branches: ["main"]
@@ -9,6 +12,11 @@ on:
     inputs:
       run_all:
         description: "Run all unit tests on H20"
+        required: false
+        default: false
+        type: boolean
+      run_non_nvidia:
+        description: "Run selected tests on every enabled non-NVIDIA backend"
         required: false
         default: false
         type: boolean
@@ -48,6 +56,7 @@ jobs:
       mode: ${{ steps.select.outputs.mode }}
       tests: ${{ steps.select.outputs.tests }}
       benchmarks: ${{ steps.select.outputs.benchmarks }}
+      non_nvidia_matrix: ${{ steps.select-backends.outputs.matrix }}
     env:
       VIRTUAL_ENV: ${{ github.workspace }}/.venv-select
 
@@ -140,6 +149,54 @@ jobs:
           echo "tests=${SELECTED_TESTS}" >> "${GITHUB_OUTPUT}"
           echo "benchmarks=${SELECTED_BENCHMARKS}" >> "${GITHUB_OUTPUT}"
 
+      # Keep this ref aligned with the reusable workflow and setup action below.
+      # Reading FlagGems' registry avoids maintaining a second backend list here.
+      - name: check out FlagGems backend registry
+        uses: actions/checkout@v6
+        with:
+          repository: flagos-ai/FlagGems
+          ref: 358368a02603789f56323aaa38f02c1ccc5f78e9
+          sparse-checkout: .github/backends.json
+          sparse-checkout-cone-mode: false
+          path: .ci/flaggems-registry
+          persist-credentials: false
+
+      - id: select-backends
+        name: select non-NVIDIA backends
+        shell: python {0}
+        env:
+          ENABLE_NON_NVIDIA: ${{ github.event_name != 'workflow_dispatch' || inputs.run_non_nvidia == true }}
+        run: |
+          import json
+          import os
+          from pathlib import Path
+
+          registry = json.loads(
+              Path(".ci/flaggems-registry/.github/backends.json").read_text()
+          )
+          enabled = os.environ.get("ENABLE_NON_NVIDIA") == "true"
+
+          selected = [
+              backend
+              for backend in registry
+              if enabled
+              and backend["enabled"]
+              and not backend["backend"].startswith("nvidia")
+          ]
+          matrix = {
+              "include": [
+                  {
+                      "backend": backend["backend"],
+                      "runner_label": backend["runner_label"],
+                      "gpu_check": backend["gpu_check"],
+                  }
+                  for backend in selected
+              ]
+          }
+          print("Selected non-NVIDIA backends:", [b["backend"] for b in selected])
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+              output.write(f"matrix={json.dumps(matrix, separators=(',', ':'))}\n")
+
   nvidia-tests:
     name: nvidia tests and benchmarks
     needs: select-targets
@@ -147,7 +204,7 @@ jobs:
     runs-on: h20
     timeout-minutes: 60
     env:
-      DNN_VENDOR: nvidia
+      FLAGGEMS_VENDOR: nvidia
       PYTHONPATH: ${{ github.workspace }}/src
       VENV_DIR: ${{ github.workspace }}/.venv
       VIRTUAL_ENV: ${{ github.workspace }}/.venv
@@ -194,3 +251,29 @@ jobs:
         run: |
           echo "Selected benchmarks: ${SELECTED_BENCHMARKS}"
           pytest -q ${SELECTED_BENCHMARKS} --level core
+
+  non-nvidia-tests:
+    name: ${{ matrix.backend }} tests and benchmarks
+    needs: select-targets
+    # The called workflow executes caller-controlled code on shared self-hosted
+    # runners, so untrusted fork pull requests must not enter this job.
+    if: >-
+      (needs.select-targets.outputs.tests != '' || needs.select-targets.outputs.benchmarks != '')
+      && fromJSON(needs.select-targets.outputs.non_nvidia_matrix).include[0] != null
+      && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.select-targets.outputs.non_nvidia_matrix) }}
+    uses: flagos-ai/FlagGems/.github/workflows/backend-test.yaml@358368a02603789f56323aaa38f02c1ccc5f78e9
+    with:
+      backend: ${{ matrix.backend }}
+      runner_label: ${{ matrix.runner_label }}
+      gpu_check_script: ${{ matrix.gpu_check }}
+      changed_files: >-
+        ${{ needs.select-targets.outputs.tests }}
+        ${{ needs.select-targets.outputs.benchmarks }}
+      test_script: tools/run-multi-backend-tests.sh
+    # FlagGems currently declares this unused secret as required. Pass only the
+    # caller's read-only token instead of exposing a long-lived runner SSH key.
+    secrets:
+      RUNNER_SSH_KEY: ${{ secrets.GITHUB_TOKEN }}

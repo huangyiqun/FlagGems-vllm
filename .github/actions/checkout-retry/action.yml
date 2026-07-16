@@ -1,0 +1,55 @@
+name: "Checkout with retry"
+description: "Check out the caller repository with up to three attempts"
+
+inputs:
+  ref:
+    description: "Git ref to check out (empty uses the workflow ref)"
+    required: false
+    default: ""
+  submodules:
+    description: "Whether to check out submodules"
+    required: false
+    default: "false"
+  fetch-depth:
+    description: "Number of commits to fetch"
+    required: false
+    default: "1"
+
+runs:
+  using: "composite"
+  steps:
+    - id: checkout-attempt-1
+      uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+      with:
+        ref: ${{ inputs.ref || github.ref }}
+        submodules: ${{ inputs.submodules }}
+        fetch-depth: ${{ inputs.fetch-depth }}
+      continue-on-error: true
+
+    - id: sleep-1
+      if: steps.checkout-attempt-1.outcome == 'failure'
+      shell: bash
+      run: sleep 30s
+
+    - id: checkout-attempt-2
+      if: steps.checkout-attempt-1.outcome == 'failure'
+      uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+      with:
+        ref: ${{ inputs.ref || github.ref }}
+        submodules: ${{ inputs.submodules }}
+        fetch-depth: ${{ inputs.fetch-depth }}
+      continue-on-error: true
+
+    - id: sleep-2
+      if: steps.checkout-attempt-2.outcome == 'failure'
+      shell: bash
+      run: sleep 30s
+
+    - id: checkout-attempt-3
+      if: steps.checkout-attempt-2.outcome == 'failure'
+      uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+      with:
+        ref: ${{ inputs.ref || github.ref }}
+        submodules: ${{ inputs.submodules }}
+        fetch-depth: ${{ inputs.fetch-depth }}
+
