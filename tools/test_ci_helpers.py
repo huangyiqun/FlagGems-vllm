@@ -15,7 +15,10 @@
 from __future__ import annotations
 
 import json
+import os
+import subprocess
 import tempfile
+import textwrap
 import unittest
 from pathlib import Path
 
@@ -203,6 +206,116 @@ class CiPinsTest(unittest.TestCase):
         pins = check_ci_pins.extract_pins(repo_root)
         self.assertEqual(len(pins), 3)
         self.assertEqual(len(set(pins)), 1)
+
+
+class CiWorkflowPolicyTest(unittest.TestCase):
+    def test_all_backend_fanout_requires_an_explicit_request(self):
+        repo_root = Path(__file__).resolve().parents[1]
+        workflow = (repo_root / ".github/workflows/basic-ci.yml").read_text(
+            encoding="utf-8"
+        )
+        all_enabled = workflow.split("ALL_ENABLED: >-", maxsplit=1)[1].split(
+            "run: |", maxsplit=1
+        )[0]
+
+        self.assertNotIn("github.event_name == 'push'", all_enabled)
+        self.assertIn("inputs.run_non_nvidia == true", all_enabled)
+        self.assertIn("'ci/all-vendors'", all_enabled)
+
+    def test_self_hosted_guards_check_the_pull_request_author(self):
+        repo_root = Path(__file__).resolve().parents[1]
+        workflow = (repo_root / ".github/workflows/basic-ci.yml").read_text(
+            encoding="utf-8"
+        )
+        author_guard = "github.event.pull_request.user.login != 'dependabot[bot]'"
+
+        self.assertEqual(workflow.count(author_guard), 3)
+        self.assertNotIn("github.actor != 'dependabot[bot]'", workflow)
+
+
+class CiSummaryTest(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        repo_root = Path(__file__).resolve().parents[1]
+        workflow = (repo_root / ".github/workflows/basic-ci.yml").read_text(
+            encoding="utf-8"
+        )
+        summary = workflow.split("  multi-backend-summary:", maxsplit=1)[1]
+        cls.script = textwrap.dedent(
+            summary.split("        run: |\n", maxsplit=1)[1]
+        ).strip()
+
+    def run_summary(self, **overrides):
+        values = {
+            "CODE_STYLE_RESULT": "success",
+            "SELECT_TARGETS_RESULT": "success",
+            "NVIDIA_RESULT": "skipped",
+            "NON_NVIDIA_RESULT": "skipped",
+            "SHOULD_RUN": "false",
+            "HAS_NON_NVIDIA_BACKENDS": "false",
+            "EVENT_NAME": "push",
+            "TRUSTED_RUN": "true",
+        }
+        values.update(overrides)
+        return subprocess.run(
+            ["bash", "-c", self.script],
+            env={**os.environ, **values},
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+
+    def test_expected_accelerator_results_succeed(self):
+        cases = {
+            "trusted_nvidia_only": {
+                "SHOULD_RUN": "true",
+                "NVIDIA_RESULT": "success",
+            },
+            "trusted_full_matrix": {
+                "SHOULD_RUN": "true",
+                "HAS_NON_NVIDIA_BACKENDS": "true",
+                "NVIDIA_RESULT": "success",
+                "NON_NVIDIA_RESULT": "success",
+            },
+            "pr_backend_preflight_only": {
+                "HAS_NON_NVIDIA_BACKENDS": "true",
+                "EVENT_NAME": "pull_request",
+                "NON_NVIDIA_RESULT": "success",
+            },
+            "untrusted_fork": {
+                "SHOULD_RUN": "true",
+                "HAS_NON_NVIDIA_BACKENDS": "true",
+                "EVENT_NAME": "pull_request",
+                "TRUSTED_RUN": "false",
+            },
+            "no_targets": {},
+        }
+
+        for name, values in cases.items():
+            with self.subTest(name=name):
+                result = self.run_summary(**values)
+                self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_missing_or_unexpected_results_fail(self):
+        cases = {
+            "preparation_failed": {"CODE_STYLE_RESULT": "failure"},
+            "expected_nvidia_skipped": {
+                "SHOULD_RUN": "true",
+                "NVIDIA_RESULT": "skipped",
+            },
+            "expected_backend_failed": {
+                "SHOULD_RUN": "true",
+                "HAS_NON_NVIDIA_BACKENDS": "true",
+                "NVIDIA_RESULT": "success",
+                "NON_NVIDIA_RESULT": "failure",
+            },
+            "unexpected_backend_run": {"NON_NVIDIA_RESULT": "success"},
+        }
+
+        for name, values in cases.items():
+            with self.subTest(name=name):
+                result = self.run_summary(**values)
+                self.assertNotEqual(result.returncode, 0)
 
 
 if __name__ == "__main__":

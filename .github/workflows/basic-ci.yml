@@ -31,7 +31,7 @@ on:
         default: false
         type: boolean
       run_non_nvidia:
-        description: "Run selected tests on every enabled non-NVIDIA backend"
+        description: "Run every non-NVIDIA backend plus the H20 baseline"
         required: false
         default: false
         type: boolean
@@ -194,9 +194,10 @@ jobs:
         shell: bash
         env:
           PR_LABELS_JSON: ${{ toJSON(github.event.pull_request.labels.*.name) }}
+          # During backend bring-up, a main push must not fan out to every
+          # enabled accelerator. Use an explicit dispatch or PR label instead.
           ALL_ENABLED: >-
-            ${{ github.event_name == 'push' ||
-                (github.event_name == 'workflow_dispatch' && inputs.run_non_nvidia == true) ||
+            ${{ (github.event_name == 'workflow_dispatch' && inputs.run_non_nvidia == true) ||
                 (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'ci/all-vendors')) }}
         run: |
           set -euo pipefail
@@ -218,7 +219,7 @@ jobs:
       needs.select-targets.outputs.should_run == 'true'
       && (github.event_name != 'pull_request'
           || (github.event.pull_request.head.repo.full_name == github.repository
-              && github.actor != 'dependabot[bot]'))
+              && github.event.pull_request.user.login != 'dependabot[bot]'))
     runs-on: h20
     timeout-minutes: 60
     env:
@@ -288,7 +289,7 @@ jobs:
           || github.event_name == 'pull_request')
       && (github.event_name != 'pull_request'
           || (github.event.pull_request.head.repo.full_name == github.repository
-              && github.actor != 'dependabot[bot]'))
+              && github.event.pull_request.user.login != 'dependabot[bot]'))
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(needs.select-targets.outputs.non_nvidia_matrix) }}
@@ -329,7 +330,7 @@ jobs:
           TRUSTED_RUN: >-
             ${{ github.event_name != 'pull_request'
                 || (github.event.pull_request.head.repo.full_name == github.repository
-                    && github.actor != 'dependabot[bot]') }}
+                    && github.event.pull_request.user.login != 'dependabot[bot]') }}
         run: |
           set -euo pipefail
 
