@@ -381,11 +381,12 @@ for its runner group.
    `python tools/check_ci_pins.py`.
 5. Add one `vendor/*` label, confirm that the expected runner is selected, and
    validate checkout, setup, imports, device discovery, and portable smoke.
-6. After that trusted run succeeds, merge the FlagGems-vllm pin update. Wait
-   for old-SHA jobs to finish before removing the old SHA from the repository
-   and runner-group policies.
-7. Add one hardware-proven operator test to that backend's allowlist, then
-   expand the list incrementally. Do not infer support from another vendor.
+6. In the same trusted pull request, add one existing operator test that has
+   passed on that hardware to the backend's allowlist, then rerun the vendor
+   lane. Do not copy a guessed path or infer support from another vendor.
+7. Only after both preflight and that allowlisted correctness test succeed,
+   merge the FlagGems-vllm pin update. Wait for old-SHA jobs to finish before
+   removing the old SHA from the repository and runner-group policies.
 8. Repeat the process for every backend that will be enabled in production.
 9. Before this workflow exists on the default branch, use `ci/all-vendors` on
    the same-repository Draft pull request for an intentional full-matrix run.
