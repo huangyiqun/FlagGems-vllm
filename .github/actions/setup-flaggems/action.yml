@@ -13,6 +13,13 @@ inputs:
 runs:
   using: "composite"
   steps:
+    - name: clean generated state from persistent runners
+      shell: bash
+      run: |
+        set -euo pipefail
+        rm -rf -- .venv .ci/flaggems build dist
+        find . -maxdepth 2 -type d -name '*.egg-info' -exec rm -rf -- {} +
+
     # Keep this checkout pinned to the same FlagGems revision as basic-ci.yml.
     - name: check out FlagGems CI support
       uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
@@ -53,6 +60,8 @@ runs:
         # and CUDA-only cupy requirements from replacing that environment.
         uv pip install --no-build-isolation --no-deps -e .
         # This test-only pure Python dependency is not provided by FlagGems.
+        # Keep dependency resolution disabled so the vendor environment's
+        # pinned packages are not upgraded or replaced.
         uv pip install --no-deps "einops>=0.6" \
           --default-index https://mirrors.aliyun.com/pypi/simple
 
@@ -93,3 +102,16 @@ runs:
           exit 1
         fi
         echo "AVAILABLE_GPUS=${available_gpus}" >> "${GITHUB_ENV}"
+
+    - name: run portable backend preflight
+      shell: bash
+      env:
+        BACKEND: ${{ inputs.backend }}
+      run: |
+        set -eo pipefail
+        source .venv/bin/activate
+        set -u
+        vendor="${BACKEND%%-*}"
+        python tools/check_backend_env.py \
+          --expected-vendor "${vendor}" \
+          --require-flaggems

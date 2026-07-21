@@ -1,5 +1,5 @@
 name: "Checkout with retry"
-description: "Check out the caller repository with up to three attempts"
+description: "Compatibility retry for the pinned FlagGems reusable workflow"
 
 inputs:
   ref:
@@ -18,12 +18,29 @@ inputs:
 runs:
   using: "composite"
   steps:
+    # The called FlagGems workflow already attempts a bootstrap checkout. Do
+    # not repeat it when the caller is present at the immutable event SHA.
+    - id: existing-checkout
+      shell: bash
+      run: |
+        if [[ -d .git ]] \
+          && [[ "$(git rev-parse HEAD)" == "${GITHUB_SHA}" ]] \
+          && git diff --quiet \
+          && git diff --cached --quiet \
+          && [[ -z "$(git ls-files --others --exclude-standard)" ]]; then
+          echo "ready=true" >> "${GITHUB_OUTPUT}"
+        else
+          echo "ready=false" >> "${GITHUB_OUTPUT}"
+        fi
+
     - id: checkout-attempt-1
+      if: steps.existing-checkout.outputs.ready != 'true'
       uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
       with:
-        ref: ${{ inputs.ref || github.ref }}
+        ref: ${{ inputs.ref || github.sha }}
         submodules: ${{ inputs.submodules }}
         fetch-depth: ${{ inputs.fetch-depth }}
+        persist-credentials: false
       continue-on-error: true
 
     - id: sleep-1
@@ -35,9 +52,10 @@ runs:
       if: steps.checkout-attempt-1.outcome == 'failure'
       uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
       with:
-        ref: ${{ inputs.ref || github.ref }}
+        ref: ${{ inputs.ref || github.sha }}
         submodules: ${{ inputs.submodules }}
         fetch-depth: ${{ inputs.fetch-depth }}
+        persist-credentials: false
       continue-on-error: true
 
     - id: sleep-2
@@ -49,6 +67,7 @@ runs:
       if: steps.checkout-attempt-2.outcome == 'failure'
       uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
       with:
-        ref: ${{ inputs.ref || github.ref }}
+        ref: ${{ inputs.ref || github.sha }}
         submodules: ${{ inputs.submodules }}
         fetch-depth: ${{ inputs.fetch-depth }}
+        persist-credentials: false

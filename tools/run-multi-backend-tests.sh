@@ -1,4 +1,19 @@
 #!/usr/bin/env bash
+
+# Copyright 2026 FlagOS Contributors
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 set -eo pipefail
 
 BACKEND="${1:?usage: $0 <backend> [pr-id]}"
@@ -14,39 +29,11 @@ set -u
 echo "Backend: ${BACKEND}"
 echo "PR ID: ${PR_ID:-n/a}"
 
-read -r -a selected_targets <<< "${CHANGED_FILES:-}"
-tests=()
-benchmarks=()
-
-for target in "${selected_targets[@]}"; do
-  case "${target}" in
-    tests/test_*.py|tests/*/test_*.py)
-      tests+=("${target}")
-      ;;
-    benchmark/test_*.py|benchmark/*/test_*.py)
-      benchmarks+=("${target}")
-      ;;
-  esac
-done
-
-if (( ${#tests[@]} == 0 && ${#benchmarks[@]} == 0 )); then
-  echo "No tests or benchmarks selected; skipping."
-  exit 0
+if [[ -n "${CHANGED_FILES:-}" ]]; then
+  export CI_TARGETS_JSON="${CHANGED_FILES}"
+else
+  export CI_TARGETS_JSON='{"schema_version":1,"mode":"skip","tests":[],"benchmarks":[]}'
 fi
-
-for target in "${tests[@]}" "${benchmarks[@]}"; do
-  if [[ ! -f "${target}" ]]; then
-    echo "Selected target does not exist: ${target}" >&2
-    exit 1
-  fi
-done
-
-if (( ${#tests[@]} > 0 )); then
-  echo "Selected tests: ${tests[*]}"
-  python -m pytest -q "${tests[@]}" --quick
-fi
-
-if (( ${#benchmarks[@]} > 0 )); then
-  echo "Selected benchmarks: ${benchmarks[*]}"
-  python -m pytest -q "${benchmarks[@]}" --level core
-fi
+exec python tools/run_ci_targets.py \
+  --backend "${BACKEND}" \
+  --capabilities .github/backend-capabilities.json
