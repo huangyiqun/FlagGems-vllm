@@ -72,6 +72,18 @@ class SelectTestsTest(TemporaryRepositoryTestCase):
             ["tests/deep/nested/test_second.py", "tests/test_first.py"],
         )
 
+    def test_backend_operator_change_selects_matching_test(self):
+        self.make_file("tests/test_mul.py")
+
+        mode, tests, benchmarks = select_tests.select_targets(
+            self.repo_root,
+            ["src/flaggems_vllm/runtime/backend/_iluvatar/ops/mul.py"],
+        )
+
+        self.assertEqual(mode, "smoke")
+        self.assertEqual(tests, ["tests/test_mul.py"])
+        self.assertEqual(benchmarks, [])
+
     def test_documentation_change_is_skipped(self):
         self.assertEqual(
             select_tests.select_targets(self.repo_root, ["docs/guide.md"]),
@@ -140,6 +152,27 @@ class SelectBackendsTest(unittest.TestCase):
             ["ascend-cann850", "kunlunxin"],
         )
 
+    def test_backend_source_change_selects_vendor_without_a_label(self):
+        selected = select_backends.select_backends(
+            self.registry,
+            set(),
+            all_enabled=False,
+            changed_files={"src/flaggems_vllm/runtime/backend/_kunlunxin/ops/mul.py"},
+        )
+        self.assertEqual(
+            [entry["backend"] for entry in selected],
+            ["kunlunxin"],
+        )
+
+    def test_unrelated_source_change_does_not_select_a_vendor(self):
+        selected = select_backends.select_backends(
+            self.registry,
+            set(),
+            all_enabled=False,
+            changed_files={"src/flaggems_vllm/ops/mul.py"},
+        )
+        self.assertEqual(selected, [])
+
     def test_label_json_requires_string_array(self):
         with self.assertRaises(ValueError):
             select_backends.parse_labels('{"vendor": "Ascend"}')
@@ -180,6 +213,21 @@ class RunCiTargetsTest(TemporaryRepositoryTestCase):
             {"tests": [], "benchmarks": []},
         )
 
+    def test_iluvatar_policy_approves_only_mul_correctness(self):
+        repo_root = Path(__file__).resolve().parents[1]
+        policy = run_ci_targets.load_policy(
+            repo_root / ".github/backend-capabilities.json", "iluvatar"
+        )
+        targets = {
+            "tests": ["tests/test_mul.py", "tests/test_flash_mla.py"],
+            "benchmarks": ["benchmark/test_mul.py"],
+        }
+
+        self.assertEqual(
+            run_ci_targets.apply_policy(targets, policy),
+            {"tests": ["tests/test_mul.py"], "benchmarks": []},
+        )
+
     def test_benchmark_command_uses_bounded_iterations(self):
         commands = run_ci_targets.build_commands(
             {"tests": [], "benchmarks": ["benchmark/test_op.py"]}
@@ -198,6 +246,57 @@ class RunCiTargetsTest(TemporaryRepositoryTestCase):
             run_ci_targets.validate_target(
                 self.repo_root, "tests/../secrets.py", "tests"
             )
+
+
+class IluvatarForkSelectionIntegrationTest(TemporaryRepositoryTestCase):
+    def test_pr50_like_change_runs_only_mul_correctness(self):
+        self.make_file("tests/test_mul.py")
+        self.make_file("tests/test_flash_mla.py")
+        self.make_file("benchmark/test_mul.py")
+        changed_files = [
+            "benchmark/core_shapes.yaml",
+            "benchmark/test_mul.py",
+            "conf/operators.yaml",
+            "src/flaggems_vllm/runtime/backend/_iluvatar/ops/__init__.py",
+            "src/flaggems_vllm/runtime/backend/_iluvatar/ops/mul.py",
+            "tests/test_mul.py",
+        ]
+        registry = [
+            {
+                "backend": "iluvatar",
+                "runner_label": "iluvatar",
+                "label": "vendor/Iluvatar",
+                "gpu_check": "tools/gpu_check_iluvatar.sh",
+                "enabled": True,
+            }
+        ]
+
+        selected_backends = select_backends.select_backends(
+            registry,
+            set(),
+            all_enabled=False,
+            changed_files=set(changed_files),
+        )
+        _, selected_tests, _ = select_tests.select_targets(
+            self.repo_root, changed_files
+        )
+        policy = run_ci_targets.load_policy(
+            Path(__file__).resolve().parents[1] / ".github/backend-capabilities.json",
+            "iluvatar",
+        )
+        approved = run_ci_targets.apply_policy(
+            # Normal pull requests pass --no-benchmarks in basic-ci.yml.
+            {"tests": selected_tests, "benchmarks": []},
+            policy,
+        )
+
+        self.assertEqual(
+            [entry["backend"] for entry in selected_backends], ["iluvatar"]
+        )
+        self.assertEqual(
+            approved,
+            {"tests": ["tests/test_mul.py"], "benchmarks": []},
+        )
 
 
 class CiPinsTest(unittest.TestCase):
@@ -222,14 +321,26 @@ class CiWorkflowPolicyTest(unittest.TestCase):
         self.assertIn("inputs.run_non_nvidia == true", all_enabled)
         self.assertIn("'ci/all-vendors'", all_enabled)
 
-    def test_self_hosted_guards_check_the_pull_request_author(self):
+    def test_forks_are_allowed_only_on_the_non_nvidia_lane(self):
         repo_root = Path(__file__).resolve().parents[1]
         workflow = (repo_root / ".github/workflows/basic-ci.yml").read_text(
             encoding="utf-8"
         )
         author_guard = "github.event.pull_request.user.login != 'dependabot[bot]'"
+        repository_guard = (
+            "github.event.pull_request.head.repo.full_name == github.repository"
+        )
+        nvidia_job = workflow.split("  nvidia-tests:", maxsplit=1)[1].split(
+            "  non-nvidia-tests:", maxsplit=1
+        )[0]
+        non_nvidia_job = workflow.split("  non-nvidia-tests:", maxsplit=1)[1].split(
+            "  multi-backend-summary:", maxsplit=1
+        )[0]
 
-        self.assertEqual(workflow.count(author_guard), 3)
+        self.assertIn(repository_guard, nvidia_job)
+        self.assertNotIn(repository_guard, non_nvidia_job)
+        self.assertIn(author_guard, nvidia_job)
+        self.assertIn(author_guard, non_nvidia_job)
         self.assertNotIn("github.actor != 'dependabot[bot]'", workflow)
 
 
@@ -254,7 +365,8 @@ class CiSummaryTest(unittest.TestCase):
             "SHOULD_RUN": "false",
             "HAS_NON_NVIDIA_BACKENDS": "false",
             "EVENT_NAME": "push",
-            "TRUSTED_RUN": "true",
+            "NVIDIA_RUN_ALLOWED": "true",
+            "NON_NVIDIA_RUN_ALLOWED": "true",
         }
         values.update(overrides)
         return subprocess.run(
@@ -286,7 +398,15 @@ class CiSummaryTest(unittest.TestCase):
                 "SHOULD_RUN": "true",
                 "HAS_NON_NVIDIA_BACKENDS": "true",
                 "EVENT_NAME": "pull_request",
-                "TRUSTED_RUN": "false",
+                "NVIDIA_RUN_ALLOWED": "false",
+                "NON_NVIDIA_RESULT": "success",
+            },
+            "dependabot_fork": {
+                "SHOULD_RUN": "true",
+                "HAS_NON_NVIDIA_BACKENDS": "true",
+                "EVENT_NAME": "pull_request",
+                "NVIDIA_RUN_ALLOWED": "false",
+                "NON_NVIDIA_RUN_ALLOWED": "false",
             },
             "no_targets": {},
         }

@@ -204,6 +204,7 @@ jobs:
           args=(
             --registry .ci/flaggems-registry/.github/backends.json
             --labels-json "${PR_LABELS_JSON:-null}"
+            --changed-files changed_files.bin
             --format github
           )
           if [[ "${ALL_ENABLED}" == "true" ]]; then
@@ -281,15 +282,16 @@ jobs:
   non-nvidia-tests:
     name: ${{ matrix.backend }} tests and benchmarks
     needs: select-targets
-    # The called workflow executes caller-controlled code on shared self-hosted
-    # runners, so untrusted fork pull requests must not enter this job.
+    # Non-NVIDIA CI intentionally accepts fork pull requests. The checked-out
+    # setup and test code is therefore untrusted; these runner groups must be
+    # dedicated to public CI and contain no secrets or persistent sensitive
+    # state. NVIDIA/H20 keeps the stricter same-repository guard above.
     if: >-
       needs.select-targets.outputs.has_non_nvidia_backends == 'true'
       && (needs.select-targets.outputs.should_run == 'true'
           || github.event_name == 'pull_request')
       && (github.event_name != 'pull_request'
-          || (github.event.pull_request.head.repo.full_name == github.repository
-              && github.event.pull_request.user.login != 'dependabot[bot]'))
+          || github.event.pull_request.user.login != 'dependabot[bot]')
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(needs.select-targets.outputs.non_nvidia_matrix) }}
@@ -327,10 +329,13 @@ jobs:
           HAS_NON_NVIDIA_BACKENDS: >-
             ${{ needs.select-targets.outputs.has_non_nvidia_backends }}
           EVENT_NAME: ${{ github.event_name }}
-          TRUSTED_RUN: >-
+          NVIDIA_RUN_ALLOWED: >-
             ${{ github.event_name != 'pull_request'
                 || (github.event.pull_request.head.repo.full_name == github.repository
                     && github.event.pull_request.user.login != 'dependabot[bot]') }}
+          NON_NVIDIA_RUN_ALLOWED: >-
+            ${{ github.event_name != 'pull_request'
+                || github.event.pull_request.user.login != 'dependabot[bot]' }}
         run: |
           set -euo pipefail
 
@@ -343,10 +348,10 @@ jobs:
 
           expect_nvidia=false
           expect_non_nvidia=false
-          if [[ "${TRUSTED_RUN}" == "true" && "${SHOULD_RUN}" == "true" ]]; then
+          if [[ "${NVIDIA_RUN_ALLOWED}" == "true" && "${SHOULD_RUN}" == "true" ]]; then
             expect_nvidia=true
           fi
-          if [[ "${TRUSTED_RUN}" == "true" && "${HAS_NON_NVIDIA_BACKENDS}" == "true" ]]; then
+          if [[ "${NON_NVIDIA_RUN_ALLOWED}" == "true" && "${HAS_NON_NVIDIA_BACKENDS}" == "true" ]]; then
             if [[ "${SHOULD_RUN}" == "true" || "${EVENT_NAME}" == "pull_request" ]]; then
               expect_non_nvidia=true
             fi

@@ -220,7 +220,11 @@ def tests_for_source(path: str, tests: set[str]) -> list[str]:
     if path.startswith("src/flaggems_vllm/ops/mhc/"):
         return ["tests/test_mhc_ops.py"] if "tests/test_mhc_ops.py" in tests else []
 
-    if not path.startswith("src/flaggems_vllm/ops/") or not path.endswith(".py"):
+    is_shared_operator = path.startswith("src/flaggems_vllm/ops/")
+    is_backend_operator = path.startswith("src/flaggems_vllm/runtime/backend/_") and (
+        "/ops/" in path or "/fused/" in path
+    )
+    if not (is_shared_operator or is_backend_operator) or not path.endswith(".py"):
         return []
 
     stem = Path(path).stem
@@ -243,7 +247,11 @@ def benchmarks_for_source(path: str, benchmarks: set[str]) -> list[str]:
             ["benchmark/test_mhc.py"] if "benchmark/test_mhc.py" in benchmarks else []
         )
 
-    if not path.startswith("src/flaggems_vllm/ops/") or not path.endswith(".py"):
+    is_shared_operator = path.startswith("src/flaggems_vllm/ops/")
+    is_backend_operator = path.startswith("src/flaggems_vllm/runtime/backend/_") and (
+        "/ops/" in path or "/fused/" in path
+    )
+    if not (is_shared_operator or is_backend_operator) or not path.endswith(".py"):
         return []
 
     stem = Path(path).stem
