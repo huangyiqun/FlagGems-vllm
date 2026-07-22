@@ -14,9 +14,11 @@
 
 from __future__ import annotations
 
+import importlib.util
 import json
 import os
 import subprocess
+import sys
 import tempfile
 import textwrap
 import unittest
@@ -315,6 +317,59 @@ class CiPinsTest(unittest.TestCase):
         self.assertEqual(len(set(pins)), 1)
 
 
+class BackendTuneConfigTest(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        repo_root = Path(__file__).resolve().parents[1]
+        module_path = repo_root / "src/flaggems_vllm/runtime/backend/backend_utils.py"
+        cls.module_name = "_flaggems_backend_utils_ci_test"
+        spec = importlib.util.spec_from_file_location(cls.module_name, module_path)
+        if spec is None or spec.loader is None:
+            raise RuntimeError(f"cannot load backend utils from {module_path}")
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[cls.module_name] = module
+        spec.loader.exec_module(module)
+        cls.backend_utils = module
+
+    @classmethod
+    def tearDownClass(cls):
+        sys.modules.pop(cls.module_name, None)
+
+    def write_config(self, content: str) -> str:
+        temporary_directory = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary_directory.cleanup)
+        path = Path(temporary_directory.name) / "tune_configs.yaml"
+        path.write_text(content, encoding="utf-8")
+        return temporary_directory.name
+
+    def test_comment_only_tune_config_is_an_empty_mapping(self):
+        directory = self.write_config("# This backend has no tuned kernels yet.\n")
+        self.assertEqual(
+            self.backend_utils.get_tune_config(file_path=directory),
+            {},
+        )
+
+    def test_iluvatar_comment_only_tune_config_loads(self):
+        self.assertEqual(self.backend_utils.get_tune_config("iluvatar"), {})
+
+    def test_non_empty_tune_config_is_preserved(self):
+        directory = self.write_config("mul:\n  BLOCK_SIZE: 128\n")
+        self.assertEqual(
+            self.backend_utils.get_tune_config(file_path=directory),
+            {"mul": {"BLOCK_SIZE": 128}},
+        )
+
+    def test_malformed_tune_config_is_rejected(self):
+        directory = self.write_config("mul: [\n")
+        with self.assertRaises(ValueError):
+            self.backend_utils.get_tune_config(file_path=directory)
+
+    def test_non_mapping_tune_config_is_rejected(self):
+        directory = self.write_config("- mul\n")
+        with self.assertRaises(ValueError):
+            self.backend_utils.get_tune_config(file_path=directory)
+
+
 class PrepareFlagGemsCiEnvironmentTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -327,6 +382,7 @@ class PrepareFlagGemsCiEnvironmentTest(unittest.TestCase):
         *,
         inherited_home_is_valid: bool = True,
         passwd_home_is_valid: bool = True,
+        uv_overrides_are_invalid: bool = False,
     ):
         temporary_directory = tempfile.TemporaryDirectory()
         self.addCleanup(temporary_directory.cleanup)
@@ -366,6 +422,20 @@ class PrepareFlagGemsCiEnvironmentTest(unittest.TestCase):
             "GITHUB_RUN_ID": "12345",
             "GITHUB_RUN_ATTEMPT": "2",
         }
+        for name in (
+            "XDG_CACHE_HOME",
+            "XDG_DATA_HOME",
+            "UV_CACHE_DIR",
+            "UV_PYTHON_INSTALL_DIR",
+        ):
+            environment.pop(name, None)
+        if uv_overrides_are_invalid:
+            invalid_cache = root / "invalid-uv-cache"
+            invalid_python = root / "invalid-uv-python"
+            invalid_cache.write_text("not a directory", encoding="utf-8")
+            invalid_python.write_text("not a directory", encoding="utf-8")
+            environment["UV_CACHE_DIR"] = str(invalid_cache)
+            environment["UV_PYTHON_INSTALL_DIR"] = str(invalid_python)
 
         result = subprocess.run(
             ["bash", str(self.helper), backend],
@@ -407,6 +477,17 @@ class PrepareFlagGemsCiEnvironmentTest(unittest.TestCase):
         self.assertEqual(list(inherited_home.rglob(".flaggems-ci-write.*")), [])
         self.assertNotIn("UV_CACHE_DIR", values)
         self.assertNotIn("UV_PYTHON_INSTALL_DIR", values)
+
+    def test_replaces_only_unusable_uv_overrides(self):
+        result, values, _, _, inherited_home, _ = self.run_helper(
+            "iluvatar", uv_overrides_are_invalid=True
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(Path(values["UV_CACHE_DIR"]), inherited_home / ".cache/uv")
+        self.assertEqual(
+            Path(values["UV_PYTHON_INSTALL_DIR"]),
+            inherited_home / ".local/share/uv/python",
+        )
 
     def test_uses_passwd_home_when_inherited_home_is_invalid(self):
         result, values, _, _, _, passwd_home = self.run_helper(
@@ -464,6 +545,18 @@ class SetupFlagGemsActionContractTest(unittest.TestCase):
         self.assertIn('uv python find "${backend_python}"', self.action)
         self.assertIn("--managed-python --no-python-downloads", self.action)
         self.assertNotIn("uv python find 3.10", self.action)
+
+    def test_each_composite_phase_emits_a_specific_failure_annotation(self):
+        for title in (
+            "Persistent runner cleanup failed",
+            "Runner environment preparation failed",
+            "FlagGems vendor setup failed",
+            "FlagGems-vllm installation failed",
+            "Accelerator availability check failed",
+            "Portable backend preflight failed",
+        ):
+            with self.subTest(title=title):
+                self.assertIn(f"::error title={title}::", self.action)
 
 
 class CiWorkflowPolicyTest(unittest.TestCase):

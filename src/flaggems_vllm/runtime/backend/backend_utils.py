@@ -53,12 +53,21 @@ def get_tune_config(vendor_name=None, file_mode="r", file_path=None):
         else:
             file_path = os.path.join(file_path, "tune_configs.yaml")
         with open(file_path, file_mode) as file:
+            # A backend may intentionally have no tuned kernels yet. PyYAML
+            # returns None for an empty or comment-only file; callers expect
+            # a mapping and iterate it during package import.
             config = yaml.safe_load(file)
+            if config is None:
+                config = {}
+            elif not isinstance(config, dict):
+                raise ValueError(f"Tune config must be a mapping: {file_path}")
     except FileNotFoundError:
         if not BACKEND_EVENT:
             raise FileNotFoundError(f"Configuration file not found: {file_path}")
     except yaml.YAMLError as e:
         raise ValueError(f"Failed to parse YAML file: {e}")
+    except ValueError:
+        raise
     except Exception as e:
         raise RuntimeError(f"An unexpected error occurred: {e}")
 
