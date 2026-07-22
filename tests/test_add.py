@@ -20,53 +20,56 @@ import flaggems_vllm
 from . import accuracy_utils as utils
 
 
-@pytest.mark.mul
+@pytest.mark.add
 @pytest.mark.parametrize("shape", utils.POINTWISE_SHAPES)
+@pytest.mark.parametrize("alpha", utils.SCALARS)
 @pytest.mark.parametrize("dtype", utils.FLOAT_DTYPES)
-def test_mul_tensor_tensor(shape, dtype):
+def test_add_tensor_tensor(shape, alpha, dtype):
     inp1 = torch.randn(shape, dtype=dtype, device=flaggems_vllm.device)
     inp2 = torch.randn(shape, dtype=dtype, device=flaggems_vllm.device)
     ref_inp1 = utils.to_reference(inp1, True)
     ref_inp2 = utils.to_reference(inp2, True)
 
-    ref_out = torch.mul(ref_inp1, ref_inp2)
+    ref_out = torch.add(ref_inp1, ref_inp2, alpha=alpha)
     with flaggems_vllm.use_gems():
-        res_out = torch.mul(inp1, inp2)
+        res_out = torch.add(inp1, inp2, alpha=alpha)
 
     utils.gems_assert_close(res_out, ref_out, dtype)
 
 
-@pytest.mark.mul
+@pytest.mark.add
 @pytest.mark.parametrize("shape", utils.POINTWISE_SHAPES)
 @pytest.mark.parametrize("scalar", utils.SCALARS)
+@pytest.mark.parametrize("alpha", utils.SCALARS)
 @pytest.mark.parametrize("dtype", utils.FLOAT_DTYPES)
-def test_mul_tensor_scalar(shape, scalar, dtype):
+def test_add_tensor_scalar(shape, scalar, alpha, dtype):
     inp = torch.randn(shape, dtype=dtype, device=flaggems_vllm.device)
     ref_inp = utils.to_reference(inp, True)
 
-    ref_out = torch.mul(ref_inp, scalar)
+    ref_out = torch.add(ref_inp, scalar, alpha=alpha)
     with flaggems_vllm.use_gems():
-        res_out = torch.mul(inp, scalar)
+        res_out = torch.add(inp, scalar, alpha=alpha)
 
     utils.gems_assert_close(res_out, ref_out, dtype)
 
 
-@pytest.mark.mul
+@pytest.mark.add
 @pytest.mark.parametrize("shape", utils.POINTWISE_SHAPES)
 @pytest.mark.parametrize("scalar", utils.SCALARS)
+@pytest.mark.parametrize("alpha", utils.SCALARS)
 @pytest.mark.parametrize("dtype", utils.FLOAT_DTYPES)
-def test_mul_scalar_tensor(shape, scalar, dtype):
+def test_add_scalar_tensor(shape, scalar, alpha, dtype):
     inp = torch.randn(shape, dtype=dtype, device=flaggems_vllm.device)
     ref_inp = utils.to_reference(inp, True)
 
-    ref_out = torch.mul(scalar, ref_inp)
+    ref_out = torch.add(scalar, ref_inp, alpha=alpha)
     with flaggems_vllm.use_gems():
-        res_out = torch.mul(scalar, inp)
+        res_out = torch.add(scalar, inp, alpha=alpha)
 
     utils.gems_assert_close(res_out, ref_out, dtype)
 
 
-@pytest.mark.mul
+@pytest.mark.add
 @pytest.mark.parametrize(
     "shape_a, shape_b",
     [
@@ -76,63 +79,65 @@ def test_mul_scalar_tensor(shape, scalar, dtype):
     ],
 )
 @pytest.mark.parametrize("dtype", utils.FLOAT_DTYPES)
-def test_mul_broadcast(shape_a, shape_b, dtype):
+def test_add_broadcast(shape_a, shape_b, dtype):
     inp1 = torch.randn(shape_a, dtype=dtype, device=flaggems_vllm.device)
     inp2 = torch.randn(shape_b, dtype=dtype, device=flaggems_vllm.device)
     ref_inp1 = utils.to_reference(inp1, True)
     ref_inp2 = utils.to_reference(inp2, True)
 
-    ref_out = torch.mul(ref_inp1, ref_inp2)
+    ref_out = torch.add(ref_inp1, ref_inp2)
     with flaggems_vllm.use_gems():
-        res_out = torch.mul(inp1, inp2)
+        res_out = torch.add(inp1, inp2)
 
     assert res_out.shape == ref_out.shape
     utils.gems_assert_close(res_out, ref_out, dtype)
 
 
-@pytest.mark.mul
+@pytest.mark.add
 @pytest.mark.parametrize("shape", utils.POINTWISE_SHAPES)
+@pytest.mark.parametrize("alpha", utils.SCALARS)
 @pytest.mark.parametrize("dtype", utils.FLOAT_DTYPES)
-def test_mul_tensor_tensor_inplace(shape, dtype):
+def test_add_tensor_tensor_inplace(shape, alpha, dtype):
     inp1 = torch.randn(shape, dtype=dtype, device=flaggems_vllm.device)
     inp2 = torch.randn(shape, dtype=dtype, device=flaggems_vllm.device)
     ref_inp1 = utils.to_reference(inp1.clone(), True)
     ref_inp2 = utils.to_reference(inp2, True)
 
-    ref_out = ref_inp1.mul_(ref_inp2)
+    ref_out = ref_inp1.add_(ref_inp2, alpha=alpha)
     with flaggems_vllm.use_gems():
-        res_out = inp1.mul_(inp2)
+        res_out = inp1.add_(inp2, alpha=alpha)
 
     assert res_out.data_ptr() == inp1.data_ptr()
     utils.gems_assert_close(res_out, ref_out, dtype)
 
 
-@pytest.mark.mul
+@pytest.mark.add
 @pytest.mark.parametrize("shape", utils.POINTWISE_SHAPES)
 @pytest.mark.parametrize("scalar", utils.SCALARS)
+@pytest.mark.parametrize("alpha", utils.SCALARS)
 @pytest.mark.parametrize("dtype", utils.FLOAT_DTYPES)
-def test_mul_tensor_scalar_inplace(shape, scalar, dtype):
+def test_add_tensor_scalar_inplace(shape, scalar, alpha, dtype):
     inp = torch.randn(shape, dtype=dtype, device=flaggems_vllm.device)
     ref_inp = utils.to_reference(inp.clone(), True)
 
-    ref_out = ref_inp.mul_(scalar)
+    ref_out = ref_inp.add_(scalar, alpha=alpha)
     with flaggems_vllm.use_gems():
-        res_out = inp.mul_(scalar)
+        res_out = inp.add_(scalar, alpha=alpha)
 
     assert res_out.data_ptr() == inp.data_ptr()
     utils.gems_assert_close(res_out, ref_out, dtype)
 
 
-@pytest.mark.mul
+@pytest.mark.add
 @pytest.mark.parametrize("shape", utils.POINTWISE_SHAPES)
-def test_mul_complex(shape):
+def test_add_complex(shape):
     inp1 = torch.randn(shape, dtype=torch.complex64, device=flaggems_vllm.device)
     inp2 = torch.randn(shape, dtype=torch.complex64, device=flaggems_vllm.device)
     ref_inp1 = utils.to_reference(inp1, True)
     ref_inp2 = utils.to_reference(inp2, True)
 
-    ref_out = torch.mul(ref_inp1, ref_inp2)
+    ref_out = torch.add(ref_inp1, ref_inp2)
     with flaggems_vllm.use_gems():
-        res_out = torch.mul(inp1, inp2)
+        res_out = torch.add(inp1, inp2)
 
     utils.gems_assert_close(res_out, ref_out, torch.complex64)

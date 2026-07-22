@@ -12,6 +12,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from .mul import mul, mul_
+from .add import add, add_
 
-__all__ = ["mul", "mul_"]
+__all__ = ["add", "add_"]
