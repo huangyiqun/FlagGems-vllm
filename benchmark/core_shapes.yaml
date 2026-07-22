@@ -21,6 +21,21 @@ single_dim_shapes: &single_dim_shapes
     - [65536]
   shape_desc: "M"
 
+mul: &mul_shapes
+  shapes:
+    - [64, 64]
+    - [256, 256]
+    - [1024, 1024]
+    - [4096, 4096]
+    - [1024, 65536]
+  shape_desc: "(B), M, N"
+
+mul_scalar:
+  <<: *mul_shapes
+
+mul_:
+  <<: *mul_shapes
+
 vdot:
   <<: *single_dim_shapes
 
