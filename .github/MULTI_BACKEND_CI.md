@@ -6,8 +6,11 @@ benchmark merely because FlagGems can create its vendor environment.
 
 ## Scheduling and trust boundary
 
-- Pull requests select non-NVIDIA backends only through the exact `label`
-  values in FlagGems' pinned `.github/backends.json`.
+- Pull requests select a non-NVIDIA backend either through the exact `label`
+  values in FlagGems' pinned `.github/backends.json` or by changing a path
+  under `src/flaggems_vllm/runtime/backend/_<vendor>/`. Path inference lets a
+  fork test the backend implementation it changes without waiting for a
+  maintainer to add a routing label.
 - `ci/all-vendors` selects every enabled non-NVIDIA backend. Use it only for a
   deliberate maintainer-approved validation run.
 - `ci/benchmark` enables the selected core benchmarks. Benchmarks also run on
@@ -18,14 +21,21 @@ benchmark merely because FlagGems can create its vendor environment.
 - During backend bring-up, a `main` push does not automatically select every
   non-NVIDIA backend. Enable that fan-out only after every production runner
   has passed its individual validation.
-- The checked-in workflow rejects fork pull requests before self-hosted jobs.
-  Because a fork can propose edits to that workflow, configure GitHub's fork
-  workflow approval policy strictly and inspect changes that weaken this
-  guard before approving a run. The pinned FlagGems workflow must enforce the
-  guard again; prefer ephemeral runner isolation as the final boundary. Do not
-  replace this protection with `pull_request_target` plus a checkout of fork
-  code. Dependabot pull requests are also excluded because GitHub applies the
-  fork security model to them.
+- Fork pull requests may enter selected non-NVIDIA self-hosted jobs without a
+  per-run maintainer gate. H20 remains restricted to same-repository pull
+  requests, and Dependabot pull requests remain excluded.
+- Treat every file in a fork checkout as arbitrary code, including workflow
+  files, local actions, package build hooks, setup scripts, and tests. Every
+  non-NVIDIA runner exposed to this public repository must therefore be a
+  one-job disposable environment with no secrets, persistent workspace,
+  internal-network access, cloud metadata, host Docker socket, or production
+  credentials. Deregistering an ephemeral runner is not enough: destroy or
+  reimage the worker after the job.
+- The currently pinned FlagGems reusable workflow accepts its runner label
+  from the caller. Runner-group workflow restrictions and caller-side guards
+  do not make a persistent machine safe from a malicious fork. Do not merge
+  this mode while any matching vendor runner retains sensitive state.
+- Do not use `pull_request_target` to check out and execute fork code.
 
 The repository must provide these labels (spelling and case are significant):
 
@@ -59,6 +69,10 @@ After a backend passes the preflight on a trusted same-repository branch, add
 only tests confirmed on that hardware to its `tests_allow` list. Enable and
 allowlist benchmarks separately after correctness is stable. The NVIDIA H20
 profile is the only initial `allow_all_tests` profile.
+
+`iluvatar` currently allows only `tests/test_mul.py` so PR #50 can provide its
+first hardware validation; a failure must be fixed or the candidate removed,
+not hidden by widening or bypassing the policy.
 
 The generic preflight is not a substitute for a vendor health query. In
 particular, the current SpaceMit descriptor exposes a CPU-compatible device
@@ -116,6 +130,14 @@ the group. The H20 job is currently defined directly in `basic-ci.yml`, so its
 group cannot use this FlagGems-only restriction until the H20 job is migrated
 to the pinned reusable workflow. Prefer an ephemeral H20 runner in the
 meantime.
+
+For non-NVIDIA runners, `Selected workflows` reduces accidental access but is
+not the fork security boundary in the currently pinned design: a fork can edit
+the caller workflow and invoke the allowed reusable workflow with a vendor
+runner label. Consequently, every runner matching `ascend`, `iluvatar`, or any
+other enabled non-NVIDIA label and visible to FlagGems-vllm must be disposable
+and isolated. Do not leave a persistent trusted runner with the same accessible
+label.
 
 ### 2. Prepare each accelerator host
 
@@ -221,9 +243,11 @@ Open `Settings -> Actions -> General` and configure:
    restrictive setting than the repository page.
 2. Require actions to use a full-length commit SHA.
 3. Keep the default `GITHUB_TOKEN` read only.
-4. Require workflow approval for all external contributors.
-5. During approval, inspect changes to workflows, composite actions, checkout
-   refs, `runs-on`, fork guards, setup scripts, and test runners.
+4. Under `Approval for running fork pull request workflows from contributors`,
+   choose the least restrictive policy permitted by the organization if fork
+   CI should start without a per-run maintainer action.
+5. Review changes to workflows, composite actions, checkout refs, `runs-on`,
+   setup scripts, and test runners as security-sensitive code before merge.
 
 For least privilege, use the specified-action patterns rather than enabling
 all actions created by GitHub, and allow the exact revisions used by the
@@ -242,8 +266,14 @@ SHA" setting applies to actions, not reusable workflows; the FlagGems workflow
 is protected separately by `uses: ...@<full-sha>`, the pin check, and the
 runner-group selected-workflow policy.
 
-Approval is a review control, not a runtime security boundary. Keep the fork
-guard in the fixed FlagGems workflow and isolate self-hosted runners.
+For public repositories GitHub does not expose a completely disabled fork
+approval policy: even its least restrictive option can still require approval
+for a first-time contributor using a new GitHub account. YAML cannot bypass
+that platform gate. Established contributors such as the author of PR #50 can
+run automatically once the repository/organization policy permits it.
+
+Approval is a review control, not a runtime isolation boundary. Automatic fork
+CI makes disposable accelerator workers mandatory.
 
 ### Labels and branch rules
 
@@ -268,7 +298,9 @@ GitHub only offers a status check for selection as required after it has
 completed successfully in the repository recently. Run `multi-backend
 summary` successfully first, then add it to the ruleset. A successful summary
 means expected accelerator jobs succeeded or were deliberately skipped by the
-trust/selection policy; it does not mean a fork PR ran on hardware.
+selection policy. For a non-Dependabot fork that selects a non-NVIDIA backend,
+the summary now requires that backend job to succeed; H20 is still expected to
+skip.
 
 If the repository enables merge queue, add and validate a `merge_group`
 trigger before requiring this check for the queue. The current workflow does
@@ -345,8 +377,9 @@ read-only `GITHUB_TOKEN`; do not create a long-lived SSH private-key secret.
 
 The FlagGems companion change must:
 
-1. enforce the same same-repository/fork guard inside the pinned called
-   workflow instead of trusting only caller-controlled workflow code;
+1. validate canonical backend/runner pairs inside the pinned called workflow,
+   detect fork pull requests from the caller context, keep NVIDIA blocked, and
+   force non-NVIDIA forks onto an immutable disposable-runner route;
 2. inline the checkout attempts in `backend-test.yaml` and leave `ref`
    unspecified (or fix it to `github.sha`);
 3. add a 60-minute timeout to the called backend job;
@@ -359,6 +392,10 @@ After that change lands, update all three FlagGems SHAs together, remove
 `.github/actions/checkout-retry`, stop passing `RUNNER_SSH_KEY`, and rerun the
 pin check.
 
+That companion hardening is not part of this FlagGems-vllm-only change. Until
+it is available and pinned, isolation of every matching vendor runner is the
+only boundary protecting infrastructure from fork-controlled code.
+
 Before changing the repository files, add the new FlagGems SHA alongside the
 old SHA in both the Actions allowlist and every non-NVIDIA runner group's
 `Selected workflows` policy. Then update the three code pins and validate a trusted
@@ -368,38 +405,33 @@ for its runner group.
 
 ## Bring-up sequence
 
-1. Merge the FlagGems companion workflow hardening and record the final commit
-   SHA from its default branch. If it is squash-merged, use the resulting
-   commit, not the pre-merge branch tip.
-2. Add that SHA alongside the old SHA in the FlagGems-vllm repository Actions
-   allowlist and every non-NVIDIA runner group's `Selected workflows` policy.
-3. Create a branch inside `flagos-ai/FlagGems-vllm` and open a Draft pull
-   request targeting `main`; fork code is deliberately blocked from
-   self-hosted runners.
-4. In that pull request, update all three FlagGems SHA pins, remove the
-   compatibility checkout action, stop passing `RUNNER_SSH_KEY`, and run
-   `python tools/check_ci_pins.py`.
-5. Add one `vendor/*` label, confirm that the expected runner is selected, and
-   validate checkout, setup, imports, device discovery, and portable smoke.
-6. In the same trusted pull request, add one existing operator test that has
-   passed on that hardware to the backend's allowlist, then rerun the vendor
-   lane. Do not copy a guessed path or infer support from another vendor.
-7. Only after both preflight and that allowlisted correctness test succeed,
-   merge the FlagGems-vllm pin update. Wait for old-SHA jobs to finish before
-   removing the old SHA from the repository and runner-group policies.
-8. Repeat the process for every backend that will be enabled in production.
-9. Before this workflow exists on the default branch, use `ci/all-vendors` on
-   the same-repository Draft pull request for an intentional full-matrix run.
-   `workflow_dispatch` is available only after the workflow file exists on the
-   default branch; then choose the intended ref and set
-   `run_non_nvidia=true`.
-10. Enable benchmarks per backend only after correctness is stable.
-11. Only after all enabled runners are operational should maintainers consider
-   restoring `github.event_name == 'push'` to the `ALL_ENABLED` expression in
-   `basic-ci.yml`.
+1. Before merging automatic fork CI, remove secrets and sensitive state from
+   every non-NVIDIA worker visible to this public repository and make each job
+   run in a fresh worker that is destroyed or reimaged afterwards.
+2. Confirm the runner groups allow `flagos-ai/FlagGems-vllm`, public-repository
+   jobs, and the pinned FlagGems reusable workflow.
+3. Configure the least restrictive fork-workflow approval policy permitted by
+   the organization. This removes per-run approval for established external
+   contributors, subject to GitHub's new-account exception described above.
+4. Merge this change into `main`, then synchronize PR #50. Its changed
+   `_iluvatar` path automatically selects the `iluvatar` backend; the existing
+   `vendor/Iluvatar` label is also a valid route but is no longer required.
+5. Confirm that H20 remains skipped while `iluvatar tests and benchmarks`
+   starts on the runner carrying the `iluvatar` label.
+6. Confirm the preflight succeeds and the target log runs
+   `tests/test_mul.py`. The Iluvatar policy deliberately drops all other tests
+   and keeps benchmarks disabled.
+7. Repeat with one backend at a time. Add tests to each backend allowlist only
+   after they pass on that hardware.
+8. Use `ci/all-vendors` or `workflow_dispatch(run_non_nvidia=true)` only for an
+   intentional full-matrix run, and enable benchmarks only after correctness
+   is stable.
+9. After FlagGems gains immutable fork routing, advance all three pins and
+   tighten runner-group policy before considering any persistent trusted
+   vendor pool.
 
-Until step 11, a `main` push intentionally runs the normal NVIDIA selection but
-does not reserve every non-NVIDIA runner.
+A `main` push intentionally runs the normal NVIDIA selection but does not
+reserve every non-NVIDIA runner.
 
 ## GitHub references
 
