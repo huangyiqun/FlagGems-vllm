@@ -8,6 +8,11 @@
     "benchmarks_allow": []
   },
   "backends": {
+    "iluvatar": {
+      "tests_allow": [
+        "tests/test_mul.py"
+      ]
+    },
     "nvidia-cuda133": {
       "allow_all_tests": true,
       "benchmarks_enabled": true,

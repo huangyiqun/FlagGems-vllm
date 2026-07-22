@@ -24,6 +24,7 @@ from pathlib import Path
 from typing import Any
 
 REQUIRED_FIELDS = ("backend", "runner_label", "label", "gpu_check", "enabled")
+BACKEND_SOURCE_ROOT = "src/flaggems_vllm/runtime/backend"
 
 
 def load_registry(path: Path) -> list[dict[str, Any]]:
@@ -66,15 +67,41 @@ def parse_labels(value: str) -> set[str]:
     return set(labels)
 
 
+def read_changed_files(path: Path | None) -> set[str]:
+    if path is None:
+        return set()
+    data = path.read_bytes()
+    entries = data.split(b"\0") if b"\0" in data else data.splitlines()
+    return {
+        entry.decode("utf-8", errors="surrogateescape").replace("\\", "/")
+        for entry in entries
+        if entry
+    }
+
+
+def backend_changed(backend: str, changed_files: set[str]) -> bool:
+    vendor = backend.split("-", maxsplit=1)[0]
+    prefix = f"{BACKEND_SOURCE_ROOT}/_{vendor}/"
+    return any(path.startswith(prefix) for path in changed_files)
+
+
 def select_backends(
-    registry: list[dict[str, Any]], labels: set[str], all_enabled: bool
+    registry: list[dict[str, Any]],
+    labels: set[str],
+    all_enabled: bool,
+    changed_files: set[str] | None = None,
 ) -> list[dict[str, str]]:
+    changed_files = changed_files or set()
     selected = []
     for entry in registry:
         backend = entry["backend"]
         if not entry["enabled"] or backend.startswith("nvidia"):
             continue
-        if not all_enabled and entry["label"] not in labels:
+        if (
+            not all_enabled
+            and entry["label"] not in labels
+            and not backend_changed(backend, changed_files)
+        ):
             continue
 
         selected.append(
@@ -91,6 +118,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--registry", required=True, type=Path)
     parser.add_argument("--labels-json", default="[]")
+    parser.add_argument("--changed-files", type=Path)
     parser.add_argument("--all-enabled", action="store_true")
     parser.add_argument("--format", choices=("github", "json", "list"), default="list")
     return parser.parse_args()
@@ -102,6 +130,7 @@ def main() -> int:
         load_registry(args.registry),
         parse_labels(args.labels_json),
         args.all_enabled,
+        read_changed_files(args.changed_files),
     )
     matrix = {"include": selected}
 
