@@ -86,10 +86,44 @@ export HOME="${home_dir}"
 export FLAGGEMS_DIR="${flaggems_dir}"
 export FLAGGEMS_VENV="${flaggems_venv}"
 
+# Respect valid runner-specific uv locations. If an inherited XDG/uv override
+# points to an unusable path, redirect only that uv store into the selected
+# writable HOME. This avoids probing one directory while uv writes elsewhere.
+uv_cache_dir="${UV_CACHE_DIR:-${XDG_CACHE_HOME:-${HOME}/.cache}/uv}"
+uv_python_dir="${UV_PYTHON_INSTALL_DIR:-${XDG_DATA_HOME:-${HOME}/.local/share}/uv/python}"
+write_uv_cache_override=false
+write_uv_python_override=false
+
+if ! probe_directory "${uv_cache_dir}"; then
+  uv_cache_dir="${HOME}/.cache/uv"
+  probe_directory "${uv_cache_dir}" || {
+    echo "Unable to prepare a writable uv cache: ${uv_cache_dir}" >&2
+    exit 1
+  }
+  export UV_CACHE_DIR="${uv_cache_dir}"
+  write_uv_cache_override=true
+fi
+
+if ! probe_directory "${uv_python_dir}"; then
+  uv_python_dir="${HOME}/.local/share/uv/python"
+  probe_directory "${uv_python_dir}" || {
+    echo "Unable to prepare a writable uv Python directory: ${uv_python_dir}" >&2
+    exit 1
+  }
+  export UV_PYTHON_INSTALL_DIR="${uv_python_dir}"
+  write_uv_python_override=true
+fi
+
 {
   printf 'HOME=%s\n' "${HOME}"
   printf 'FLAGGEMS_DIR=%s\n' "${FLAGGEMS_DIR}"
   printf 'FLAGGEMS_VENV=%s\n' "${FLAGGEMS_VENV}"
+  if [[ "${write_uv_cache_override}" == true ]]; then
+    printf 'UV_CACHE_DIR=%s\n' "${UV_CACHE_DIR}"
+  fi
+  if [[ "${write_uv_python_override}" == true ]]; then
+    printf 'UV_PYTHON_INSTALL_DIR=%s\n' "${UV_PYTHON_INSTALL_DIR}"
+  fi
 } >> "${GITHUB_ENV}"
 
 echo "Using ${home_source} FlagGems CI HOME: ${HOME}"
